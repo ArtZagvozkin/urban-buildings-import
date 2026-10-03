@@ -1,14 +1,25 @@
 # URBAN Buildings Import
 
-История собрана тематически из завершённого проекта.
-Первый этап содержит неизменяемые исходники, конфигурацию, исторические границы
-и проверенное окружение. Алгоритмы подготовки добавляются следующим этапом.
+История собрана тематически из завершённого проекта. Даты коммитов обозначают
+пересборку истории, а не время выполнения импортов. Исторические SHA в
+свидетельствах являются документальными идентификаторами и не требуют старых Git-объектов.
 
-Windows x64, CPython 3.14.4. Установка:
+## Установка
+
+Windows x64, CPython 3.14.4. Каждый checkout имеет собственную `.venv`.
 
 ```powershell
 py -3.14 -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements.lock
+.\.venv\Scripts\python -m pip install -e . --no-deps --no-build-isolation
 ```
 
-Все 14 GeoJSON и четыре границы сохранены побайтово.
+## Доступные команды
+
+```powershell
+python -m urban_import prepare <territory>
+```
+
+Исходники `data/raw/` и исторические границы `reference/boundaries/` неизменяемы.
+Рабочие планы, backup, журналы и runtime находятся вне Git.
+Справка команд на русском: `python -m urban_import <command> --help`.
