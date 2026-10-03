@@ -11,6 +11,8 @@
 - `python -m urban_import reproduce all`: подробная русская справка с `--help`.
 - `python -m urban_import verify-current all`: подробная русская справка с `--help`.
 - `python -m urban_import status`: подробная русская справка с `--help`.
+- `python -m urban_import restore-preview all`: подробная русская справка с `--help`.
+- `python -m urban_import restore-check <plan.json>`: подробная русская справка с `--help`.
 
 POST/DELETE требуют отдельного разрешения по новому проверенному плану.
 Проверки подготовки и GET не изменяют базу.

@@ -8,7 +8,7 @@ from .distributed import build_worker_runtime, collect_worker_results, create_au
 from .prepare import prepare_territory
 from .storage import ARTIFACTS, create_run, new_run_id, resolve_run, run_paths
 from .workflow import apply_plan, create_plan, verify_run
-from .results import RESULTS, ReadOnlyApi, load_result, prepare_completed_result, reproduce, status_markdown, verify_current
+from .results import RESULTS, ReadOnlyApi, create_restoration_plan, load_result, prepare_completed_result, read_restoration_plan, reproduce, status_markdown, verify_current
 from .storage import read_json
 
 def _add_connection_arguments(parser: argparse.ArgumentParser, delay: float=0.2) -> None:
@@ -80,7 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_connection_arguments(final, delay=0.1)
     _help(final)
     final.set_defaults(action='verify-final')
-    for name, description in (('reproduce', 'offline: воспроизвести все тела запросов завершённого результата'), ('verify-current', 'новая GET-проверка канонического результата')):
+    for name, description in (('reproduce', 'offline: воспроизвести все тела запросов завершённого результата'), ('verify-current', 'новая GET-проверка канонического результата'), ('restore-preview', 'создать новый план восстановления текущего результата; только GET')):
         command = commands.add_parser(name, add_help=False, help=description, description=description)
         _help(command)
         command.add_argument('territory', help='имя территории или all')
@@ -99,6 +99,16 @@ def build_parser() -> argparse.ArgumentParser:
     _help(result_status)
     result_status.add_argument('territory', nargs='?', default='all', help='имя территории или all')
     result_status.set_defaults(action='status')
+    restore_check = commands.add_parser('restore-check', add_help=False, help='проверить целостность нового плана восстановления')
+    _help(restore_check)
+    restore_check.add_argument('plan', type=Path, help='сохранённый новый план')
+    restore_check.set_defaults(action='restore-check')
+    restore_apply = commands.add_parser('restore-apply', add_help=False, help='POST: выполнить отдельно разрешённый новый план восстановления')
+    _help(restore_apply)
+    restore_apply.add_argument('plan', type=Path, help='проверенный новый план')
+    restore_apply.add_argument('--authorize-plan-sha256', required=True, help='точная SHA-256 нового плана после отдельного разрешения записи')
+    _add_connection_arguments(restore_apply, delay=0.4)
+    restore_apply.set_defaults(action='restore-apply')
     return parser
 
 def _api(args, *, read_only: bool=False) -> UrbanApi:
@@ -138,6 +148,17 @@ def main() -> None:
             entry, _ = load_result(key)
             print(json.dumps({'territory': key, **entry}, ensure_ascii=False, indent=2))
         return
+    if action == 'restore-check':
+        plan = read_restoration_plan(args.plan)
+        print(json.dumps({'territory': plan['territory'], 'sha256': plan['sha256'], 'create': len(plan['create']), 'unresolved': plan['unresolved'], 'write_authorized': False}, ensure_ascii=False, indent=2))
+        return
+    if action == 'restore-apply':
+        from .restoration import apply_restoration
+        report = apply_restoration(_api(args), args.plan, args.authorize_plan_sha256)
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        if report['issues']:
+            raise SystemExit(2)
+        return
     if action == 'status-doc':
         expected = status_markdown()
         path = ROOT / 'docs' / 'status.md'
@@ -148,7 +169,7 @@ def main() -> None:
             path.write_text(expected, encoding='utf-8', newline='\n')
         print('docs/status.md соответствует results/index.json')
         return
-    if action in {'reproduce', 'verify-current'}:
+    if action in {'reproduce', 'verify-current', 'restore-preview'}:
         keys = list(read_json(RESULTS / 'index.json')['territories']) if args.territory == 'all' else [args.territory]
         reports = []
         for key in keys:
@@ -157,6 +178,12 @@ def main() -> None:
                 report, _ = reproduce(key)
             elif action == 'verify-current':
                 report = verify_current(_api(args, read_only=True), key, check_old_geometries=args.check_old_geometries)
+            else:
+                output = args.output or ARTIFACTS / 'restoration' / new_run_id()
+                if len(keys) > 1 or args.output is None:
+                    output = output / f'{key}-plan.json'
+                plan = create_restoration_plan(_api(args, read_only=True), key, output)
+                report = {'territory': key, 'plan': str(output), 'create': len(plan['create']), 'preserve': len(plan['preserve']), 'issues': plan['unresolved'], 'write_authorized': False}
             reports.append(report)
             print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
         if any((report.get('issues') for report in reports)):

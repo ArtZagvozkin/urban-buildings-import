@@ -411,8 +411,120 @@ def verify_current(api, key: str, *, root: Path = RESULTS,
     return report
 
 
+def create_restoration_plan(api, key: str, output: Path, *, root: Path = RESULTS) -> dict:
+    """Новый неизменяемый план воссоздания результата; команда ничего не записывает в API.
+
+Неизвестные, изменённые или неоднозначные объекты блокируют исполнение.
+Сервисные связи нельзя переносить на новые ID молча: они имеют отдельные
+зависимые действия с сохранёнными данными и требуют проверки живого контракта.
+"""
+
+    if Path(output).exists():
+        raise RuntimeError("План уже существует; выберите новый путь")
+    entry, data = load_result(key, root)
+    _, accepted = reproduce(key, root)
+    territory = get_territory(key)
+    contract = api.validate_write_contract()  # Только GET OpenAPI, не разрешение записи.
+    descendants, objects = api.export_area_objects(territory.territory_id, territory.allowed_type_ids)
+    by_osm = {}
+    by_id = {item["physical_object_id"]: item for item in objects}
+    original_retained_ids = {r["object"]["physical_object_id"] for r in data["retained"]}
+    for item in objects:
+        if item.get("osm_id"):
+            by_osm.setdefault(item["osm_id"], []).append(item)
+    desired = [(f"osm:{record['osm_id']}", record) for record in accepted]
+    desired += [(f"retained:{record['object']['physical_object_id']}", retained_payload(record))
+                for record in data["retained"]]
+    creates, building_creates, preserved, conflicts, links, relationship_checks = [], [], [], [], [], []
+    used = set()
+    for identity, record in desired:
+        physical = record["physical_object"]
+        original_id = int(identity.split(":", 1)[1]) if identity.startswith("retained:") else None
+        if original_id in by_id:
+            # Совпадающие точки могут иметь разные сервисы. Пока прежний ID
+            # существует, он однозначно определяет сохраняемый объект.
+            candidates = [by_id[original_id]]
+        elif physical.get("osm_id"):
+            candidates = by_osm.get(physical["osm_id"], [])
+        else:
+            candidates = [item for item in objects
+                          if item["physical_object_id"] not in original_retained_ids | used
+                          and not item.get("osm_id") and not compare_payload(item, physical, record["building"])]
+        if len(candidates) > 1:
+            conflicts.append(f"ambiguous:{identity}")
+        elif candidates:
+            item = candidates[0]
+            used.add(item["physical_object_id"])
+            mismatches = compare_payload(item, physical, record["building"])
+            if mismatches == ["missing_building"]:
+                building_creates.append({"identity": identity,
+                                         "physical_object_id": item["physical_object_id"],
+                                         "object_geometry_id": item["object_geometry_id"],
+                                         "physical_object": physical, "body": record["building"]})
+                preserved.append({"identity": identity, "physical_object_id": item["physical_object_id"],
+                                  "object_geometry_id": item["object_geometry_id"]})
+            elif mismatches:
+                conflicts.append(f"changed:{identity}")
+            else:
+                preserved.append({"identity": identity, "physical_object_id": item["physical_object_id"],
+                                  "object_geometry_id": item["object_geometry_id"]})
+        else:
+            creates.append({"identity": identity, **record})
+        if identity.startswith("retained:"):
+            saved = next(r for r in data["retained"]
+                         if identity == f"retained:{r['object']['physical_object_id']}")
+            relations = expanded_relations(saved, data)
+            dependent = (relations["services"] or relations.get("external_physical_objects")
+                         or relations.get("external_geometries") or len(relations["geometries"]) != 1)
+            if dependent:
+                links.append({"identity": identity, "relations": relations,
+                              "requires_new_id_binding": not candidates})
+                if not candidates:
+                    conflicts.append(f"service_relationship_recreation_requires_review:{identity}")
+                elif len(candidates) == 1:
+                    relationship_checks.append((identity, candidates[0], relations))
+    # Те же независимые GET, что в verify: ограниченный общий темп и отдельная
+    # HTTP-сессия потока. Большой план не требует тысяч последовательных TLS GET.
+    live_relationships = fetch_retained_relations(api, [item for _, item, _ in relationship_checks])
+    for identity, item, relations in relationship_checks:
+        if json_digest(live_relationships[item["physical_object_id"]]) != json_digest(relations):
+            conflicts.append(f"retained_relationship_changed:{identity}")
+    unexpected = set(item["physical_object_id"] for item in objects) - used
+    if unexpected:
+        conflicts.append(f"unexpected_objects:{len(unexpected)}")
+    plan = {
+        "format_version": 1, "kind": "restore-current-result-plan",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "territory": key, "territory_id": territory.territory_id,
+        "source_result_sha256": entry["data"]["sha256"],
+        "original_plan_sha256": data["original_plan_sha256"],
+        "api_contract_sha256": json_digest(contract) if contract else None,
+        "server_snapshot_sha256": json_digest(sorted(objects, key=lambda x: x["physical_object_id"])),
+        "descendant_ids": descendants, "create": creates, "create_buildings": building_creates,
+        "preserve": preserved,
+        "relationship_actions": links, "delete": [], "unresolved": conflicts,
+        "requires_separate_authorization": True, "destructive_apply_authorized": False,
+        "server_ids_will_change": True,
+    }
+    plan["sha256"] = json_digest(plan)
+    write_json(output, plan)
+    return plan
 
 
+def read_restoration_plan(path: Path, root: Path = RESULTS) -> dict:
+    """Проверить новый план и его связь с компактным результатом до исполнения."""
+
+    plan = read_json(path)
+    if (plan.get("kind") != "restore-current-result-plan"
+            or plan.get("sha256") != json_digest({k: v for k, v in plan.items() if k != "sha256"})):
+        raise RuntimeError("Повреждён план восстановления")
+    entry, _ = load_result(plan["territory"], root)
+    if plan["source_result_sha256"] != entry["data"]["sha256"]:
+        raise RuntimeError("План относится к другому текущему результату")
+    for record in plan["create"]:
+        if {"physical_object_id", "object_geometry_id"} & record["physical_object"].keys():
+            raise RuntimeError("Тело создания не может задавать серверные ID")
+    return plan
 
 
 def status_markdown(root: Path = RESULTS) -> str:

@@ -26,6 +26,8 @@ python -m urban_import worker-run --bundle <path> --dry-run
 python -m urban_import reproduce all
 python -m urban_import verify-current all
 python -m urban_import status
+python -m urban_import restore-preview all
+python -m urban_import restore-check <plan.json>
 ```
 
 Исходники `data/raw/` и исторические границы `reference/boundaries/` неизменяемы.

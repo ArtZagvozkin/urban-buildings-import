@@ -153,12 +153,42 @@ def test_verification_detects_retained_service_changes(small_result):
     assert "retained:102:relations" in results.verify_current(api, "reutov")["issues"]
 
 
+def test_restore_plan_recreates_missing_import_and_retained_point_without_old_ids(small_result, tmp_path):
+    api, _ = small_result
+    api.objects = []
+    plan = results.create_restoration_plan(api, "reutov", tmp_path / "restore.json")
+    assert len(plan["create"]) == 2 and not plan["unresolved"]
+    assert {r["physical_object"]["geometry"]["type"] for r in plan["create"]} == {"Polygon", "Point"}
+    assert all("physical_object_id" not in r["physical_object"] for r in plan["create"])
+    assert not plan["destructive_apply_authorized"] and plan["requires_separate_authorization"]
+    assert plan["delete"] == []
+    with pytest.raises(RuntimeError, match="уже существует"):
+        results.create_restoration_plan(api, "reutov", tmp_path / "restore.json")
 
 
+def test_restore_plan_does_not_duplicate_present_objects(small_result, tmp_path):
+    api, _ = small_result
+    plan = results.create_restoration_plan(api, "reutov", tmp_path / "restore.json")
+    assert plan["create"] == [] and len(plan["preserve"]) == 2
 
 
+def test_restore_plan_can_add_missing_building_without_recreating_object(small_result, tmp_path):
+    api, _ = small_result
+    api.objects[0]["building"] = None
+    plan = results.create_restoration_plan(api, "reutov", tmp_path / "restore.json")
+    assert plan["create"] == [] and not plan["unresolved"]
+    assert len(plan["create_buildings"]) == 1
+    assert plan["create_buildings"][0]["physical_object_id"] == 101
+    assert plan["create_buildings"][0]["body"] == {"floors": 2}
 
 
+def test_restore_plan_blocks_unknown_objects_and_lost_service_dependencies(small_result, tmp_path):
+    api, data = small_result
+    data["retained"][0]["relations"]["services"] = [{"service_id": 7}]
+    api.objects = [api.objects[0]]
+    plan = results.create_restoration_plan(api, "reutov", tmp_path / "restore.json")
+    assert any("service_relationship" in issue for issue in plan["unresolved"])
+    assert plan["relationship_actions"][0]["requires_new_id_binding"]
 
 
 def test_status_document_matches_machine_readable_catalog():
@@ -185,7 +215,88 @@ def test_result_semantics_reject_corruption_even_if_file_hash_updated(tmp_path, 
         results.load_result("odintsovsky", tmp_path)
 
 
+@pytest.mark.parametrize("failure_stage", ["create_object", "create_building"])
+def test_restore_resume_reconciles_lost_post_and_does_not_duplicate(small_result, tmp_path, failure_stage):
+    from urban_import.api import UncertainWrite
+    from urban_import.restoration import apply_restoration
+
+    api, _ = small_result
+    desired = deepcopy(api.objects[0])
+    api.objects = [api.objects[1]]
+    path = tmp_path / "restore.json"
+    plan = results.create_restoration_plan(api, "reutov", path)
+    calls = []
+    original_get = api.get
+
+    def get(endpoint, params=None):
+        if endpoint.startswith("/api/v1/object_geometries/"):
+            geometry_id = int(endpoint.split("/")[-2])
+            return [deepcopy(item) for item in api.objects if item["object_geometry_id"] == geometry_id]
+        return original_get(endpoint, params)
+
+    def post(endpoint, body):
+        calls.append(endpoint)
+        if endpoint.endswith("physical_objects"):
+            item = deepcopy(desired)
+            item.update(physical_object_id=501, object_geometry_id=601, building=None)
+            api.objects.append(item)
+            response = {"physical_object": {"physical_object_id": 501},
+                        "object_geometry": {"object_geometry_id": 601}}
+            if failure_stage == "create_object" and calls.count(endpoint) == 1:
+                raise UncertainWrite("response lost")
+            return response
+        item = next(x for x in api.objects if x["physical_object_id"] == body["physical_object_id"])
+        item["building"] = {"id": 701, **{k: v for k, v in body.items() if k != "physical_object_id"}}
+        if failure_stage == "create_building" and calls.count(endpoint) == 1:
+            raise UncertainWrite("building response lost")
+        return {"id": 701}
+
+    api.get = get
+    api.post = post
+    with pytest.raises(UncertainWrite):
+        apply_restoration(api, path, plan["sha256"])
+    report = apply_restoration(api, path, plan["sha256"])
+    assert report["stage"] == "complete" and not report["issues"]
+    assert calls.count("/api/v1/physical_objects") == 1
+    assert calls.count("/api/v1/buildings") == 1
+    assert any(x["physical_object_id"] == 501 for x in report["bindings"])
+    apply_restoration(api, path, plan["sha256"])
+    assert len(calls) == 2
 
 
+def test_restore_executor_requires_authorization_for_exact_new_plan(small_result, tmp_path):
+    from urban_import.restoration import apply_restoration
+    api, _ = small_result
+    path = tmp_path / "restore.json"
+    results.create_restoration_plan(api, "reutov", path)
+    with pytest.raises(RuntimeError, match="разрешения"):
+        apply_restoration(api, path, "authorization-from-old-plan")
 
 
+def test_identical_retained_points_use_known_ids_and_pending_excludes_preserved_twin(small_result, tmp_path):
+    from urban_import.restoration import apply_restoration
+    from urban_import.storage import RunPaths
+    from urban_import.workflow import OperationState
+    api, data = small_result
+    original = deepcopy(api.objects[1])
+    twin = deepcopy(original)
+    twin.update(physical_object_id=103, object_geometry_id=203)
+    api.objects.append(twin)
+    data["retained"].append({"object": results.normalize_server_object(twin),
+                             "relations": {"services": [], "geometries": [{"object_geometry_id": 203}], "urban_objects": []}})
+    intact = results.create_restoration_plan(api, "reutov", tmp_path / "intact.json")
+    assert not intact["unresolved"] and not intact["create"] and len(intact["preserve"]) == 3
+    api.objects = [item for item in api.objects if item["physical_object_id"] != 102]
+    path = tmp_path / "missing.json"
+    plan = results.create_restoration_plan(api, "reutov", path)
+    assert len(plan["create"]) == 1 and not plan["unresolved"]
+    state = OperationState(RunPaths("reutov", "test", tmp_path / "missing-execution"), path)
+    state.data["stage"] = "creating_objects"
+    state.save()
+    state.begin("create_object", "0")
+    restored = deepcopy(original)
+    restored.update(physical_object_id=501, object_geometry_id=601)
+    api.objects.append(restored)
+    # Нет метода post: попытка слепой повторной записи немедленно уронит тест.
+    report = apply_restoration(api, path, plan["sha256"])
+    assert not report["issues"] and report["stage"] == "complete"
