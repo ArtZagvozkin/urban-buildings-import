@@ -1,0 +1,21 @@
+# Tested Windows x64 environment; install before pip install -e . --no-deps
+altgraph==0.17.5
+certifi==2026.7.22
+charset-normalizer==3.5.1
+colorama==0.4.6
+idna==3.20
+iniconfig==2.3.0
+numpy==2.5.3
+packaging==26.3
+pefile==2024.8.26
+pluggy==1.6.0
+pygments==2.21.0
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.7
+pyproj==3.8.0
+pytest==9.1.1
+pywin32-ctypes==0.2.3
+requests==2.34.2
+setuptools==84.0.0
+shapely==2.1.2
+urllib3==2.8.0

@@ -1,0 +1,154 @@
+{
+  "reutov": {
+    "name": "Реутов",
+    "territory_id": 5231,
+    "api_name_contains": "Реутов",
+    "allowed_physical_object_type_ids": [4, 5],
+    "sources": [
+      {
+        "path": "data/raw/reutov_residential.geojson",
+        "physical_object_type_id": 4,
+        "is_living": true,
+        "expected_features": 649
+      },
+      {
+        "path": "data/raw/reutov_nonresidential.geojson",
+        "physical_object_type_id": 5,
+        "is_living": false,
+        "expected_features": 1026
+      }
+    ],
+    "classification": {
+      "conflict_policy": "exclude",
+      "require_is_living_match": true
+    },
+    "scope": {
+      "boundary": "live_municipal_geometry",
+      "include_descendants": true,
+      "replace_geometry_types": ["Polygon", "MultiPolygon"]
+    },
+    "expected_preparation": {
+      "source": 1675,
+      "accepted": 1570,
+      "excluded": 105,
+      "residential": 552,
+      "nonresidential": 1018
+    }
+  },
+  "zhukovsky": {
+    "name": "Жуковский",
+    "territory_id": 5202,
+    "api_name_contains": "Жуковский",
+    "allowed_physical_object_type_ids": [4, 5],
+    "sources": [
+      {
+        "path": "data/raw/zhukovsky_residential.geojson",
+        "physical_object_type_id": 4,
+        "is_living": true,
+        "expected_features": 6260
+      },
+      {
+        "path": "data/raw/zhukovsky_nonresidential.geojson",
+        "physical_object_type_id": 5,
+        "is_living": false,
+        "expected_features": 1408
+      }
+    ],
+    "classification": {
+      "conflict_policy": "exclude",
+      "require_is_living_match": true
+    },
+    "scope": {
+      "boundary": "live_municipal_geometry",
+      "include_descendants": true,
+      "replace_geometry_types": ["Polygon", "MultiPolygon"]
+    },
+    "expected_preparation": {
+      "source": 7668,
+      "accepted": 3877,
+      "excluded": 3791,
+      "residential": 2542,
+      "nonresidential": 1335
+    }
+  },
+  "lotoshino": {
+    "name": "Лотошино",
+    "territory_id": 5215,
+    "api_name_contains": "Лотошино",
+    "allowed_physical_object_type_ids": [4, 5],
+    "sources": [
+      {
+        "path": "data/raw/lotoshino_residential.geojson",
+        "physical_object_type_id": 4,
+        "is_living": true,
+        "expected_features": 8125
+      },
+      {
+        "path": "data/raw/lotoshino_nonresidential.geojson",
+        "physical_object_type_id": 5,
+        "is_living": false,
+        "expected_features": 687
+      }
+    ],
+    "classification": {
+      "conflict_policy": "exclude",
+      "require_is_living_match": true
+    },
+    "scope": {
+      "boundary": "live_municipal_geometry",
+      "include_descendants": true,
+      "replace_geometry_types": ["Polygon", "MultiPolygon"]
+    },
+    "expected_preparation": {
+      "source": 8812,
+      "accepted": 8795,
+      "excluded": 17,
+      "residential": 8111,
+      "nonresidential": 684
+    }
+  },
+  "odintsovsky": {
+    "name": "Одинцовский городской округ",
+    "territory_id": 5223,
+    "api_name_contains": "Одинцовский",
+    "allowed_physical_object_type_ids": [4, 5],
+    "sources": [
+      {"path": "data/raw/odintsovsky_part1_residential.geojson", "physical_object_type_id": 4, "is_living": true, "expected_features": 17987},
+      {"path": "data/raw/odintsovsky_part1_nonresidential.geojson", "physical_object_type_id": 5, "is_living": false, "expected_features": 3541},
+      {"path": "data/raw/odintsovsky_part2_residential.geojson", "physical_object_type_id": 4, "is_living": true, "expected_features": 20323},
+      {"path": "data/raw/odintsovsky_part2_nonresidential.geojson", "physical_object_type_id": 5, "is_living": false, "expected_features": 1205},
+      {"path": "data/raw/odintsovsky_part3_residential.geojson", "physical_object_type_id": 4, "is_living": true, "expected_features": 20345},
+      {"path": "data/raw/odintsovsky_part3_nonresidential.geojson", "physical_object_type_id": 5, "is_living": false, "expected_features": 1183},
+      {"path": "data/raw/odintsovsky_part4_residential.geojson", "physical_object_type_id": 4, "is_living": true, "expected_features": 17025},
+      {"path": "data/raw/odintsovsky_part4_nonresidential.geojson", "physical_object_type_id": 5, "is_living": false, "expected_features": 4504}
+    ],
+    "classification": {
+      "conflict_policy": "exclude",
+      "require_is_living_match": true
+    },
+    "scope": {
+      "boundary": "live_municipal_geometry",
+      "include_descendants": true,
+      "replace_geometry_types": ["Polygon", "MultiPolygon"]
+    },
+    "expected_preparation": {
+      "source": 86113,
+      "accepted": 85434,
+      "excluded": 679,
+      "residential": 75352,
+      "nonresidential": 10082
+    },
+    "distributed": {
+      "workers": 4,
+      "replacement_confirmed": false,
+      "retained_server_objects": [
+        {
+          "physical_object_id": 694562,
+          "object_geometry_id": 694559,
+          "service_ids": [735682, 736856],
+          "reason": "Сохранить объект и геометрию вместе с двумя действующими сервисными связями"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,15 @@
+* text=auto
+.gitattributes text eol=lf
+.gitignore text eol=lf
+*.md text eol=lf
+*.py text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.lock text eol=lf
+*.ps1 text eol=lf
+*.cmd text eol=crlf
+*.txt text eol=lf
+# Preserve the original bytes of input data.
+data/raw/*.geojson -text
+results/**/*.gz -text

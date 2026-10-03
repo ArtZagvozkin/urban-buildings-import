@@ -1,0 +1,24 @@
+# Local credentials and environment
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Generated data, plans, exports, states and execution logs
+artifacts/
+distribution/
+input/
+build/
+.kilo/worktrees/
+*.log
+
+# Editor and operating system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,18 @@
+# Keep the structural index focused on executable code and tests. Large source
+# GeoJSON files, API snapshots, backups and run state remain available through
+# ordinary file tools but do not make code navigation slower.
+include:
+  - urban_import
+  - tests
+  - scripts
+
+exclude:
+  - .git
+  - .kilo
+  - .pytest_cache
+  - .venv
+  - data
+  - results
+  - reference
+
+no_ignore: false
