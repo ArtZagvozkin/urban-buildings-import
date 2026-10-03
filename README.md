@@ -21,6 +21,8 @@ python -m urban_import prepare <territory>
 python -m urban_import preview <territory>
 python -m urban_import apply <territory>
 python -m urban_import verify <territory>
+python -m urban_import distributed-package <territory>
+python -m urban_import worker-run --bundle <path> --dry-run
 ```
 
 Исходники `data/raw/` и исторические границы `reference/boundaries/` неизменяемы.
