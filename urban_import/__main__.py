@@ -6,6 +6,7 @@ from .api import DEFAULT_BASE_URL, UrbanApi
 from .config import ROOT, get_territory
 from .prepare import prepare_territory
 from .storage import ARTIFACTS, create_run, new_run_id, resolve_run, run_paths
+from .workflow import apply_plan, create_plan, verify_run
 from .storage import read_json
 
 def _add_connection_arguments(parser: argparse.ArgumentParser, delay: float=0.2) -> None:
@@ -28,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument('territory', help='стабильное имя территории')
     common.add_argument('--run', help='идентификатор запуска; по умолчанию активный')
     _add_connection_arguments(common)
-    for name, description in [('prepare', 'проверить GeoJSON без изменения API')]:
+    for name, description in [('prepare', 'проверить GeoJSON без изменения API'), ('preview', 'создать обычный backup и план только через GET'), ('apply', 'выполнить или продолжить обычный план'), ('verify', 'независимая GET-проверка обычного плана')]:
         command = commands.add_parser(name, parents=[common], add_help=False, help=description, description=description)
         _help(command)
         command.set_defaults(action=name)
@@ -54,6 +55,17 @@ def main() -> None:
     if action == 'prepare':
         paths = create_run(territory.key, args.run)
         result = prepare_territory(api, territory, paths)
+    else:
+        paths = resolve_run(territory.key, args.run)
+        if territory.distributed_workers > 1 and action in {'preview', 'apply'}:
+            raise RuntimeError('Для территории разрешён только distributed-package; apply заблокирован')
+        if action == 'preview':
+            plan = create_plan(api, territory, paths)
+            result = {'planned_delete': len(plan['existing_ids']), 'retained': len(plan['retained_ids']), 'planned_create': plan['counts']['accepted'], 'unresolved': plan['unresolved']}
+        elif action == 'apply':
+            result = apply_plan(api, territory, paths)
+        else:
+            result = verify_run(api, territory, paths)
     location = paths.directory
     print(f'LOCATION: {location}')
     print(json.dumps(result, ensure_ascii=False, indent=2))

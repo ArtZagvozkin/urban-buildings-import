@@ -18,6 +18,9 @@ py -3.14 -m venv .venv
 
 ```powershell
 python -m urban_import prepare <territory>
+python -m urban_import preview <territory>
+python -m urban_import apply <territory>
+python -m urban_import verify <territory>
 ```
 
 Исходники `data/raw/` и исторические границы `reference/boundaries/` неизменяемы.
