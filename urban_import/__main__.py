@@ -8,6 +8,7 @@ from .distributed import build_worker_runtime, collect_worker_results, create_au
 from .prepare import prepare_territory
 from .storage import ARTIFACTS, create_run, new_run_id, resolve_run, run_paths
 from .workflow import apply_plan, create_plan, verify_run
+from .results import RESULTS, ReadOnlyApi, load_result, prepare_completed_result, reproduce, status_markdown, verify_current
 from .storage import read_json
 
 def _add_connection_arguments(parser: argparse.ArgumentParser, delay: float=0.2) -> None:
@@ -79,10 +80,29 @@ def build_parser() -> argparse.ArgumentParser:
     _add_connection_arguments(final, delay=0.1)
     _help(final)
     final.set_defaults(action='verify-final')
+    for name, description in (('reproduce', 'offline: воспроизвести все тела запросов завершённого результата'), ('verify-current', 'новая GET-проверка канонического результата')):
+        command = commands.add_parser(name, add_help=False, help=description, description=description)
+        _help(command)
+        command.add_argument('territory', help='имя территории или all')
+        command.set_defaults(action=name)
+        if name != 'reproduce':
+            _add_connection_arguments(command)
+        if name == 'verify-current':
+            command.add_argument('--check-old-geometries', action='store_true', help='повторить дорогую GET-проверку каждого старого geometry ID')
+        if name == 'restore-preview':
+            command.add_argument('--output', type=Path, help='путь нового плана; для all задаётся каталог')
+    status_doc = commands.add_parser('status-doc', add_help=False, help='сформировать или проверить docs/status.md по results/index.json')
+    _help(status_doc)
+    status_doc.add_argument('--check', action='store_true', help='только проверить соответствие')
+    status_doc.set_defaults(action='status-doc')
+    result_status = commands.add_parser('status', add_help=False, help='показать текущие подтверждённые результаты')
+    _help(result_status)
+    result_status.add_argument('territory', nargs='?', default='all', help='имя территории или all')
+    result_status.set_defaults(action='status')
     return parser
 
 def _api(args, *, read_only: bool=False) -> UrbanApi:
-    api = UrbanApi(args.base_url, delay=args.delay, timeout=args.timeout)
+    api = (ReadOnlyApi if read_only else UrbanApi)(args.base_url, delay=args.delay, timeout=args.timeout)
     direct = getattr(args, 'direct_server_ip', None)
     source = getattr(args, 'source_ip', None)
     if bool(direct) != bool(source):
@@ -112,6 +132,42 @@ def _distributed_package(args) -> tuple[dict, Path]:
 def main() -> None:
     args = build_parser().parse_args()
     action = args.action
+    if action == 'status':
+        keys = list(read_json(RESULTS / 'index.json')['territories']) if args.territory == 'all' else [args.territory]
+        for key in keys:
+            entry, _ = load_result(key)
+            print(json.dumps({'territory': key, **entry}, ensure_ascii=False, indent=2))
+        return
+    if action == 'status-doc':
+        expected = status_markdown()
+        path = ROOT / 'docs' / 'status.md'
+        if args.check:
+            if path.read_text(encoding='utf-8') != expected:
+                raise SystemExit('docs/status.md отличается от results/index.json')
+        else:
+            path.write_text(expected, encoding='utf-8', newline='\n')
+        print('docs/status.md соответствует results/index.json')
+        return
+    if action in {'reproduce', 'verify-current'}:
+        keys = list(read_json(RESULTS / 'index.json')['territories']) if args.territory == 'all' else [args.territory]
+        reports = []
+        for key in keys:
+            print(f'Начало {action}: {key}', flush=True)
+            if action == 'reproduce':
+                report, _ = reproduce(key)
+            elif action == 'verify-current':
+                report = verify_current(_api(args, read_only=True), key, check_old_geometries=args.check_old_geometries)
+            reports.append(report)
+            print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
+        if any((report.get('issues') for report in reports)):
+            raise SystemExit(2)
+        return
+    if action == 'verify' and args.run is None and (RESULTS / 'index.json').exists():
+        result = verify_current(_api(args, read_only=True), args.territory)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        if result['issues']:
+            raise SystemExit(2)
+        return
     if action == 'worker-status':
         result, location = (worker_status(args.bundle), Path(args.bundle))
     elif action == 'worker-stop':
@@ -146,7 +202,10 @@ def main() -> None:
         api = _api(args)
         if action == 'prepare':
             paths = create_run(territory.key, args.run)
-            result = prepare_territory(api, territory, paths)
+            if not args.live_boundary and (RESULTS / 'index.json').exists() and (territory.key in read_json(RESULTS / 'index.json')['territories']):
+                result = prepare_completed_result(territory.key, paths)
+            else:
+                result = prepare_territory(api, territory, paths)
         else:
             paths = resolve_run(territory.key, args.run)
             if territory.distributed_workers > 1 and action in {'preview', 'apply'}:
