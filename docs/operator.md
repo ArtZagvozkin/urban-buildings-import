@@ -1,18 +1,110 @@
 # Инструкция оператора
 
-Установка и доступные команды описаны в README.
+## 1. Установка и состояние
 
-- `python -m urban_import prepare <territory>`: подробная русская справка с `--help`.
-- `python -m urban_import preview <territory>`: подробная русская справка с `--help`.
-- `python -m urban_import apply <territory>`: подробная русская справка с `--help`.
-- `python -m urban_import verify <territory>`: подробная русская справка с `--help`.
-- `python -m urban_import distributed-package <territory>`: подробная русская справка с `--help`.
-- `python -m urban_import worker-run --bundle <path> --dry-run`: подробная русская справка с `--help`.
-- `python -m urban_import reproduce all`: подробная русская справка с `--help`.
-- `python -m urban_import verify-current all`: подробная русская справка с `--help`.
-- `python -m urban_import status`: подробная русская справка с `--help`.
-- `python -m urban_import restore-preview all`: подробная русская справка с `--help`.
-- `python -m urban_import restore-check <plan.json>`: подробная русская справка с `--help`.
+Установить Windows x64 CPython 3.14.4. В корне собственного checkout:
 
-POST/DELETE требуют отдельного разрешения по новому проверенному плану.
-Проверки подготовки и GET не изменяют базу.
+```powershell
+py -3.14 -m venv .venv
+.\.venv\Scripts\python -m pip install -r requirements.lock
+.\.venv\Scripts\python -m pip install -e . --no-deps --no-build-isolation
+.\.venv\Scripts\python -m urban_import status
+```
+
+Копирование чужой `.venv` не требуется. Каноническое состояние читается из
+`results/index.json`; другие checkout и Desktop не нужны.
+
+## 2. Повторная подготовка без сети
+
+```powershell
+.\.venv\Scripts\python -m urban_import reproduce all
+.\.venv\Scripts\python -m urban_import prepare reutov
+```
+
+`reproduce all` проверяет количества, решения и все тела запросов четырёх территорий
+по сохранённым границам. Временные подготовленные файлы автоматически удаляются.
+`prepare` сохраняет accepted/audit/disputed в новом рабочем каталоге `artifacts/`.
+По умолчанию использует историческую границу; `--live-boundary` предназначен
+для нового импорта по текущей границе. Старый подтверждённый результат не меняется.
+
+## 3. Независимая проверка
+
+```powershell
+.\.venv\Scripts\python -m urban_import verify-current all
+.\.venv\Scripts\python -m urban_import verify-current odintsovsky --check-old-geometries
+```
+
+Первая команда заново выгружает серверные объекты и связи. Вторая дополнительно
+проверяет каждый заменённый geometry ID; десятки тысяч GET могут занять часы.
+Ошибки дают ненулевой exit code. Отчёты находятся в
+`artifacts/verification/<territory>.json`; подтверждённый каталог в git не
+переписывается автоматически. Перед публикацией новой проверки проверить отчёт,
+обновить index и сформировать status-doc.
+
+Указать одну территорию вместо `all`, если требуется узкая проверка. `verify`
+без `--run` также проверяет текущий компактный результат.
+
+Параметры сети: `--timeout 90`, `--delay 0.2`, `--base-url`. GET повторяются при
+временных сбоях и 429/5xx. При ошибке можно безопасно повторить проверку: запись
+в базе не выполняется. Проверяется именно новое состояние API.
+
+Если локальный TUN/VPN мешает HTTPS, сначала проверить маршрут. Необязательная
+пара `--direct-server-ip <IP API> --source-ip <IP своего интерфейса>` сохраняет
+проверку исходного TLS-имени. Адреса другого компьютера не копируются. Неверные
+CA/proxy настройки окружения следует устранить; TLS verify не отключается.
+
+## 4. Новый план восстановления текущего результата
+
+```powershell
+.\.venv\Scripts\python -m urban_import restore-preview all --output artifacts\restoration\new-plan
+.\.venv\Scripts\python -m urban_import restore-check artifacts\restoration\new-plan\reutov-plan.json
+```
+
+Preview использует только GET. На исправном сервере план имеет нулевое создание
+и сохраняет весь текущий результат. На частично утраченной базе он содержит тела
+создания недостающих объектов, buildings и зависимые сервисные связи.
+Изменённые/неожиданные объекты и неоднозначность должны быть разобраны; их
+автоматическое удаление не разрешается.
+
+Отдельно разрешить запись по новой SHA-256 после проверки плана. Во время
+реорганизации этот шаг **не выполняется**. После отдельного разрешения:
+
+```powershell
+.\.venv\Scripts\python -m urban_import restore-apply <plan.json> --authorize-plan-sha256 <SHA-256-нового-плана>
+```
+
+Повторить ту же команду после сбоя. Состояние и журнал находятся рядом с планом
+в `<имя-плана>-execution/`. Не удалять state и не запускать вторую копию плана
+одновременно. Неопределённый POST сначала сверяется; сообщение о двух проверках
+отсутствия означает необходимость выждать не менее 60 секунд и продолжить.
+
+Сервисные связи исчезнувшего защищённого объекта требуют проверенного отдельного
+правила привязки к новым ID. До этого apply заблокирован. Итоговый отчёт
+восстановления содержит новые соответствия ID; первоначальные ID не обещаются.
+После проверки эти соответствия используются для новой версии каталога results.
+Возврат к содержимому базы до импорта не является целью этого проекта.
+
+## 5. Новые импорты
+
+Обычные территории: `prepare --live-boundary`, `preview`, отдельное разрешение,
+`apply`, затем `verify --run <новый-run-id>`. Повторный apply продолжает состояние.
+Backup и проверенный план нового запуска сохраняются в `artifacts/` до завершения.
+
+Для новой полной замены Одинцова используется `distributed-package`; новый
+master plan и четыре node-папки создаются заново. После отдельного подтверждения
+полного набора и разрешения используется `distributed-authorize`. Старый
+компактный результат не является worker-планом или authorization.
+
+На узлах: `run.cmd --dry-run`, `run.cmd`, `status.cmd -Watch`, `stop.cmd`.
+Можно выполнить разные worker на одном ПК; один worker нельзя запускать в двух
+копиях. При переносе остановить процесс и скопировать всю рабочую папку.
+Возврат: `export-result.cmd`; сбор: `collect-results`; проверка: `verify-final`.
+Каждая команда имеет `--help`. Runtime не входит в Git и пересоздаётся проектом.
+
+## 6. Проверки проекта
+
+```powershell
+.\.venv\Scripts\python -m pytest -q
+powershell -ExecutionPolicy Bypass -File scripts/update-ast-index.ps1
+.\.venv\Scripts\python -m urban_import status-doc --check
+```
